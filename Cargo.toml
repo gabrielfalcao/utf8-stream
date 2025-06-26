@@ -1,0 +1,19 @@
+[package]
+name = "utf8-stream"
+version = "0.0.0"
+edition = "2024"
+description = "Lightweight crate that provides Utf8Stream that \"streams\" over utf8 chunks and derefs to string slices"
+documentation = "https://docs.rs/utf8-stream"
+readme = "README.md"
+homepage = "https://github.com/gabrielfalcao/utf8-stream"
+license = "MIT"
+keywords = ["utf8", "unicode", "streamer"]
+authors = ["Gabriel DeMoura <gabrielteratos@gmail.com>"]
+categories = ["internationalization", "localization", "parsing"]
+
+[package.metadata.docs.rs]
+cargo-args = ["-Zunstable-options"]
+
+[lib]
+name = "utf8_stream"
+path = "src/lib.rs"
