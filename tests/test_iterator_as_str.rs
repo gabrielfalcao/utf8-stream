@@ -6,13 +6,18 @@ fn test_utf8_esoteric() {
     let mut stream = Utf8Stream::new("👩🏽‍🚒");
     assert_eq!(stream.as_str(), "👩🏽‍🚒");
     assert_eq!(stream.next(), Some("👩🏽‍🚒"));
+    assert_eq!(stream.next_back(), Some("👩🏽‍🚒"));
 }
 
 #[test]
 fn test_iter_new() {
-    let stream = Utf8Stream::new("test");
+    let mut stream = Utf8Stream::new("test");
     assert_eq!(stream.as_str(), "test");
     assert_eq!(stream.as_bytes(), b"test");
+    assert_eq!(stream.next(), Some("t"));
+    assert_eq!(stream.next(), Some("e"));
+    assert_eq!(stream.next_back(), Some("e"));
+    assert_eq!(stream.next_back(), Some("t"));
     assert_eq!(
         stream.map(String::from).collect::<Vec<String>>(),
         vec!["t", "e", "s", "t"]

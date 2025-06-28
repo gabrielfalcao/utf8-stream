@@ -10,7 +10,7 @@ pub fn get_utf8_at_index<'g>(stream: &Utf8Stream, index: usize) -> (&'g str, usi
         return ("", index, 0, 0);
     }
     if get_byte_at_index(ptr, index) < 127 {
-        return (get_str_slice_of(ptr, index, 1), index, index + 1, 1);
+        return (get_str_slice_of(ptr, index, 1), index, 1, 1);
     }
 
     let requested_index = index;

@@ -1,6 +1,8 @@
 use std::alloc::Layout;
 use std::fmt::{Debug, Display, Formatter};
-use std::iter::{Extend, FromIterator, IntoIterator, Iterator};
+use std::iter::{
+    DoubleEndedIterator, ExactSizeIterator, Extend, FromIterator, IntoIterator, Iterator,
+};
 use std::marker::PhantomData;
 use std::ops::Deref;
 
@@ -155,7 +157,7 @@ impl<'g> Utf8Stream<'g> {
 impl<'g> Iterator for Utf8Stream<'g> {
     type Item = &'g str;
 
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next(&mut self) -> Option<&'g str> {
         if self.index == self.length {
             None
         } else {
@@ -164,7 +166,7 @@ impl<'g> Iterator for Utf8Stream<'g> {
                 if (self.index + count) <= self.length {
                     self.index += count;
                 } else {
-                    self.index = self.length -1;
+                    self.index = self.length - 1;
                 }
                 Some(slice)
             } else {
@@ -173,7 +175,30 @@ impl<'g> Iterator for Utf8Stream<'g> {
         }
     }
 }
-
+impl<'g> DoubleEndedIterator for Utf8Stream<'g> {
+    fn next_back(&mut self) -> Option<&'g str> {
+        if self.index == 0 {
+            None
+        } else {
+            let (slice, index, offset, count) = get_utf8_at_index(self, self.index-1);
+            if count > 0 {
+                if self.index >= count && (self.index - count) > 0 {
+                    self.index -= count;
+                } else {
+                    self.index = 0;
+                }
+                Some(slice)
+            } else {
+                None
+            }
+        }
+    }
+}
+impl<'g> ExactSizeIterator for Utf8Stream<'g> {
+    fn len(&self) -> usize {
+        self.length
+    }
+}
 impl<'g> Extend<char> for Utf8Stream<'g> {
     fn extend<T: IntoIterator<Item = char>>(&mut self, iter: T) {
         for string in iter {
