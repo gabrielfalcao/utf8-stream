@@ -4,6 +4,11 @@ use std::iter::{Extend, FromIterator, IntoIterator, Iterator};
 use std::marker::PhantomData;
 use std::ops::Deref;
 
+use crate::internal::{
+    get_byte_slice_of, get_utf8_at_index, grow_ptr, is_not_ascii_byte, shrink_ptr,
+    to_slice_ptr_from_display,
+};
+
 /// Utf8Stream
 ///
 /// ## Example
@@ -16,9 +21,9 @@ use std::ops::Deref;
 #[doc(alias = "Stream")]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Utf8Stream<'g> {
-    ptr: *mut u8,
-    index: usize,
-    length: usize,
+    pub(crate) ptr: *mut u8,
+    pub(crate) index: usize,
+    pub(crate) length: usize,
     _marker: PhantomData<&'g u8>,
 }
 
@@ -119,163 +124,54 @@ impl<'g> Utf8Stream<'g> {
         }
     }
     pub fn get(&self, index: usize) -> Option<&'g str> {
-        if index < self.length {
-            let byte = unsafe { self.ptr.add(index).read() };
-            if is_not_ascii_byte(byte) {
-                self.get_esoteric_utf8(index)
-            } else {
-                let bytes = unsafe { std::slice::from_raw_parts(self.ptr.add(index), 1) };
-                if let Ok(c) = std::str::from_utf8(bytes) {
-                    Some(c)
-                } else {
-                    None
-                }
-            }
-        } else {
+        let (slice, _, _, count) = get_utf8_at_index(self, index);
+        if count == 0 || count == 1 && &slice[0..1] == "\0" {
             None
+        } else {
+            Some(slice)
         }
     }
     pub fn last(&self) -> Option<&'g str> {
-        if self.length > 0 {
-            self.get(self.length - 1)
-        } else {
+        if self.length == 0 {
             None
+        } else {
+            self.get(self.length - 1)
         }
     }
     pub fn pop(&mut self) -> Option<&'g str> {
-        if self.length > 0 {
-            let old_length = self.length;
-            let new_length = old_length - 1;
-            let ptr = unsafe { self.ptr.add(new_length) };
-            let bytes = unsafe { std::slice::from_raw_parts(ptr, 1) };
-            unsafe {
-                ptr.drop_in_place();
-            }
-            shrink_ptr(self.ptr, old_length, new_length);
-            self.length = new_length;
-            if let Ok(c) = std::str::from_utf8(bytes) {
-                Some(c)
-            } else {
-                None
-            }
+        let old_length = self.length;
+        if self.length == 0 {
+            return None;
+        }
+        let (slice, index, offset, count) = get_utf8_at_index(self, self.length - 1);
+        if count > 0 {
+            self.length -= count;
+            Some(slice)
         } else {
             None
         }
-    }
-
-    fn get_esoteric_utf8(&self, index: usize) -> Option<&'g str> {
-        let mut max = self.length - index;
-        #[allow(unused_assignments)]
-        let mut offset_byte = 0;
-        let mut delta = 0;
-        for offset in 0..max {
-            if index + offset >= self.length {
-                continue;
-            }
-            let offset = max - if offset == 0 { 0 } else { offset % max };
-            offset_byte = unsafe { self.ptr.add(index + offset - 1).read() };
-            if offset_byte < 127 {
-                max = offset;
-                continue;
-            }
-            delta += 1;
-            let bytes = unsafe { std::slice::from_raw_parts(self.ptr.add(index), offset) };
-            match std::str::from_utf8(bytes) {
-                Ok(c) => {
-                    if offset < max && is_not_ascii_byte(offset_byte) {
-                        let max_delta = delta - 1;
-                        return Some(unsafe {
-                            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                                self.ptr.add(index),
-                                max - max_delta,
-                            ))
-                        });
-                    } else {
-                    }
-                    return Some(c);
-                }
-                Err(_e) => {}
-            }
-        }
-        None
     }
 }
 impl<'g> Iterator for Utf8Stream<'g> {
     type Item = &'g str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.length {
-            let index = self.index;
-            let byte = unsafe { self.ptr.add(index).read() };
-            if is_not_ascii_byte(byte) {
-                return self.esoteric_utf8_offset_tick(index);
-            }
-            self.index += 1;
-            let bytes = unsafe { std::mem::transmute::<&[u8], &'g [u8]>(&[byte]) };
-            if let Ok(c) = std::str::from_utf8(bytes) {
-                Some(c)
+        if self.index == self.length {
+            None
+        } else {
+            let (slice, index, offset, count) = get_utf8_at_index(self, self.index);
+            if count > 0 {
+                if (self.index + count) <= self.length {
+                    self.index += count;
+                } else {
+                    self.index = self.length -1;
+                }
+                Some(slice)
             } else {
                 None
             }
-        } else {
-            None
         }
     }
-}
-impl<'g> Utf8Stream<'g> {
-    fn esoteric_utf8_offset_tick(&mut self, index: usize) -> Option<&'g str> {
-        let mut max = self.length - index;
-        #[allow(unused_assignments)]
-        let mut offset_byte = 0;
-        let mut delta = 0;
-        for offset in 0..max {
-            if index + offset >= self.length {
-                continue;
-            }
-            let offset = max - if offset == 0 { 0 } else { offset % max };
-            offset_byte = unsafe { self.ptr.add(index + offset - 1).read() };
-            if offset_byte < 127 {
-                max = offset;
-                continue;
-            }
-            delta += 1;
-            let bytes = unsafe { std::slice::from_raw_parts(self.ptr.add(index), offset) };
-            match std::str::from_utf8(bytes) {
-                Ok(c) => {
-                    if offset < max && is_not_ascii_byte(offset_byte) {
-                        self.index = index + max - delta + 1;
-                        let max_delta = delta - 1;
-                        return Some(unsafe {
-                            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                                self.ptr.add(index),
-                                max - max_delta,
-                            ))
-                        });
-                    } else {
-                    }
-                    self.index = index + offset;
-                    return Some(c);
-                }
-                Err(_e) => {}
-            }
-        }
-        None
-    }
-}
-fn to_slice_ptr_from_display<T: Display>(input: T) -> *mut u8 {
-    let bytes = input.to_string().as_bytes().to_vec();
-
-    let ptr = new_ptr(bytes.len());
-    let length = bytes.len();
-    if length == 0 {
-        return ptr;
-    }
-    for (i, c) in bytes.iter().enumerate() {
-        unsafe {
-            ptr.add(i).write(*c);
-        }
-    }
-    ptr
 }
 
 impl<'g> Extend<char> for Utf8Stream<'g> {
@@ -367,57 +263,5 @@ impl<'g> Deref for Utf8Stream<'g> {
 
     fn deref(&self) -> &str {
         self.as_str()
-    }
-}
-
-fn new_ptr(size: usize) -> *mut u8 {
-    let layout = Layout::array::<u8>(if size == 0 { 1 } else { size }).unwrap();
-    let ptr = unsafe {
-        let ptr = std::alloc::alloc_zeroed(layout);
-        if ptr.is_null() {
-            std::alloc::handle_alloc_error(layout);
-        }
-        ptr
-    };
-    let ptr = ptr;
-    for a in 0..size {
-        unsafe {
-            ptr.add(a).write(0);
-        }
-    }
-    ptr
-}
-fn grow_ptr(ptr: *mut u8, old_size: usize, new_size: usize) -> *mut u8 {
-    let layout = Layout::array::<u8>(old_size).unwrap();
-    let new_ptr = unsafe {
-        let new_ptr = std::alloc::realloc(ptr, layout, new_size);
-        if new_ptr.is_null() {
-            std::alloc::handle_alloc_error(layout);
-        }
-        new_ptr
-    };
-    new_ptr
-}
-
-fn shrink_ptr(ptr: *mut u8, old_size: usize, new_size: usize) -> *mut u8 {
-    let layout = Layout::array::<u8>(old_size).unwrap();
-    let new_ptr = unsafe {
-        let new_ptr = std::alloc::realloc(ptr, layout, new_size);
-        if new_ptr.is_null() {
-            std::alloc::handle_alloc_error(layout);
-        }
-        new_ptr
-    };
-    new_ptr
-}
-
-fn is_not_ascii_byte(byte: u8) -> bool {
-    !is_ascii_printable_byte(byte) || byte > 127
-}
-
-fn is_ascii_printable_byte(byte: u8) -> bool {
-    match byte {
-        9..13 | 32..126 => true,
-        _ => false,
     }
 }

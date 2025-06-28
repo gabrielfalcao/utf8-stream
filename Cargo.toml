@@ -18,14 +18,20 @@ cargo-args = ["-Zunstable-options"]
 [lib]
 name = "utf8_stream"
 path = "src/lib.rs"
+doctest = false
+test = true
 
 [[test]]
-name = "test_get_and_index"
-path = "./tests/test_get_and_index.rs"
+name = "test_iterator_as_str"
+path = "./tests/test_iterator_as_str.rs"
 
 [[test]]
 name = "test_contiguous_u8_operations"
 path = "./tests/test_contiguous_u8_operations.rs"
+
+[[test]]
+name = "test_get_and_index"
+path = "./tests/test_get_and_index.rs"
 
 [[test]]
 name = "test_deref_str"
@@ -38,7 +44,3 @@ path = "./tests/test_extend.rs"
 [[test]]
 name = "test_from_string_and_string_slices"
 path = "./tests/test_from_string_and_string_slices.rs"
-
-[[test]]
-name = "test_iterator_as_str"
-path = "./tests/test_iterator_as_str.rs"
