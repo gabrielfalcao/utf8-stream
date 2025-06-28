@@ -6,10 +6,8 @@ use std::iter::{
 use std::marker::PhantomData;
 use std::ops::Deref;
 
-use crate::internal::{
-    get_byte_slice_of, get_utf8_at_index, grow_ptr, is_not_ascii_byte, shrink_ptr,
-    to_slice_ptr_from_display,
-};
+use crate::heuristics::get_utf8_at_index;
+use crate::internal::{grow_ptr, shrink_ptr, to_slice_ptr_from_display};
 
 /// Utf8Stream
 ///
@@ -19,9 +17,9 @@ use crate::internal::{
 /// use utf8_stream::Utf8Stream;
 /// let stream = Utf8Stream::new("fire👩🏽‍🚒fighter");
 /// assert_eq!(stream.as_str(), "fire👩🏽‍🚒fighter");
-/// /// ```
+/// ```
 #[doc(alias = "Stream")]
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Utf8Stream<'g> {
     pub(crate) ptr: *mut u8,
     pub(crate) index: usize,
@@ -50,7 +48,7 @@ impl<'g> Drop for Utf8Stream<'g> {
     }
 }
 impl<'g> Utf8Stream<'g> {
-    /// Creates a new [Utf8Stream](Self) from any implementor of [`Display`](std::fmt::Display)
+    /// Creates a new [Utf8Stream](Self) from any implementor of [`Display`]
     ///
     /// ```
     /// use utf8_stream::Utf8Stream;
@@ -93,23 +91,79 @@ impl<'g> Utf8Stream<'g> {
         }
     }
 
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    /// let mut stream = Utf8Stream::new("red❤️heart");
+    ///
+    /// assert_eq!(stream.contains("❤️"), true);
+    /// assert_eq!(stream.contains("heart"), true);
+    /// ```
     pub fn contains<T: Display>(&mut self, input: T) -> bool {
         self.as_str().contains(&input.to_string())
     }
 
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    /// let mut stream = Utf8Stream::new("red❤️heart");
+    ///
+    /// stream.clear();
+    /// assert_eq!(stream.len(), 0);
+    /// assert_eq!(stream.is_empty(), true);
+    /// ```
     pub fn clear(&mut self) {
         shrink_ptr(self.ptr, self.length, 1);
         self.length = 0;
         self.index = 0;
     }
 
+    /// ```
+    /// let mut stream = Utf8Stream::new("red❤️heart");
+    ///
+    /// assert_eq!(stream.get(0), Some("r"));
+    /// assert_eq!(stream.get(3), Some("❤️"));
+    /// assert_eq!(stream.next(), Some("r"));
+    /// assert_eq!(stream.next(), Some("e"));
+    /// assert_eq!(stream.next(), Some("d"));
+    /// assert_eq!(stream.next(), Some("❤️"));
+    /// stream.rewind();
+    /// assert_eq!(stream.get(0), Some("r"));
+    /// assert_eq!(stream.get(3), Some("❤️"));
+    /// assert_eq!(stream.next(), Some("r"));
+    /// assert_eq!(stream.next(), Some("e"));
+    /// assert_eq!(stream.next(), Some("d"));
+    /// assert_eq!(stream.next(), Some("❤️"));
+    /// ```
     pub fn rewind(&mut self) {
         self.index = 0;
     }
 
+    /// Returns the number of bytes in the given stream. To retrieve
+    /// the number of string elements consider calling
+    /// [`as_str`](Self::as_str) or dereferencing.
+    ///
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    ///
+    /// let stream = Utf8Stream::new("❤️");
+    /// assert_eq!(stream.len(), 6);
+    /// let stream = Utf8Stream::new("👩🏽‍🚒");
+    /// assert_eq!(stream.len(), 15);
+    /// let stream = Utf8Stream::new("👩🏽‍");
+    /// assert_eq!(stream.len(), 11);
+    /// let stream = Utf8Stream::new("👩🏽");
+    /// assert_eq!(stream.len(), 8);
+    /// let stream = Utf8Stream::new("👩");
+    /// assert_eq!(stream.len(), 4);
+    /// ```
     pub fn len(&self) -> usize {
         self.length
     }
+
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    /// let stream = Utf8Stream::new("👩🏽‍🚒");
+    /// assert_eq!(stream.as_str(), "👩🏽‍🚒");
+    /// ```
     pub fn as_str(&self) -> &str {
         let mut offset = self.length;
         loop {
@@ -125,6 +179,32 @@ impl<'g> Utf8Stream<'g> {
             }
         }
     }
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    /// let stream = Utf8Stream::new("👩🏽‍🚒");
+    /// assert_eq!(stream.as_bytes(), "👩🏽‍🚒");
+    /// ```
+    pub fn as_bytes(&self) -> &'g [u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.length) }
+    }
+
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    ///
+    /// let stream = Utf8Stream::new("");
+    /// assert_eq!(stream.is_empty(), true);
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    ///
+    /// let mut stream = Utf8Stream::new("red❤️heart");
+    ///
+    /// assert_eq!(stream.get(3), Some("❤️"));
+    /// assert_eq!(stream.get(13), Some("t"));
+    /// ```
     pub fn get(&self, index: usize) -> Option<&'g str> {
         let (slice, _, _, count) = get_utf8_at_index(self, index);
         if count == 0 || count == 1 && &slice[0..1] == "\0" {
@@ -133,13 +213,45 @@ impl<'g> Utf8Stream<'g> {
             Some(slice)
         }
     }
-    pub fn last(&self) -> Option<&'g str> {
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    ///
+    /// let mut stream = Utf8Stream::new("red❤️heart");
+    ///
+    /// assert_eq!(stream.last_printable(), Some("t"));
+    /// ```
+    pub fn last_printable(&self) -> Option<&'g str> {
         if self.length == 0 {
             None
         } else {
-            self.get(self.length - 1)
+            let mut index = self.length;
+            loop {
+                if let Some(slice) = self.get(index) {
+                    if slice != "\0" {
+                        return Some(slice);
+                    }
+                } else if index == 0 {
+                    return None;
+                }
+                index -= 1;
+            }
         }
     }
+    /// ```
+    /// use utf8_stream::Utf8Stream;
+    ///
+    /// let mut stream = Utf8Stream::new("red❤️heart");
+    /// assert_eq!(stream.as_str(), "red❤️heart");
+    /// assert_eq!(stream.pop(), Some("t"));
+    /// assert_eq!(stream.pop(), Some("r"));
+    /// assert_eq!(stream.pop(), Some("a"));
+    /// assert_eq!(stream.pop(), Some("e"));
+    /// assert_eq!(stream.pop(), Some("h"));
+    /// assert_eq!(stream.pop(), Some("❤️"));
+    /// assert_eq!(stream.pop(), Some("d"));
+    /// assert_eq!(stream.pop(), Some("e"));
+    /// assert_eq!(stream.pop(), Some("r"));
+    /// ```
     pub fn pop(&mut self) -> Option<&'g str> {
         let old_length = self.length;
         if self.length == 0 {
@@ -180,7 +292,7 @@ impl<'g> DoubleEndedIterator for Utf8Stream<'g> {
         if self.index == 0 {
             None
         } else {
-            let (slice, index, offset, count) = get_utf8_at_index(self, self.index-1);
+            let (slice, index, offset, count) = get_utf8_at_index(self, self.index - 1);
             if count > 0 {
                 if self.index >= count && (self.index - count) > 0 {
                     self.index -= count;
@@ -280,6 +392,27 @@ impl<'g> From<&String> for Utf8Stream<'g> {
 impl<'g> Display for Utf8Stream<'g> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+impl<'g> Debug for Utf8Stream<'g> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let length = self.length;
+        let index = self.index;
+        fn pad(byte: u8) -> String {
+            let byte = byte.to_string();
+            let pad = " ".repeat(3 - byte.len());
+            format!("{byte}{pad}")
+        }
+        write!(
+            f,
+            "Utf8Stream{{index:{index}, length:{length}}}[\n{}\n]",
+            self.as_bytes()
+                .iter()
+                .map(Clone::clone)
+                .map(|c| format!("{}{}, // {:#?}", " ".repeat(4), pad(c), char::from(c)))
+                .collect::<Vec<String>>()
+                .join(",\n"),
+        )
     }
 }
 

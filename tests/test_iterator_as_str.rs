@@ -1,10 +1,10 @@
 use utf8_stream::Utf8Stream;
 
-
 #[test]
 fn test_utf8_esoteric() {
     let mut stream = Utf8Stream::new("👩🏽‍🚒");
     assert_eq!(stream.as_str(), "👩🏽‍🚒");
+    assert_eq!(stream.get(0), Some("👩🏽‍🚒"));
     assert_eq!(stream.next(), Some("👩🏽‍🚒"));
     assert_eq!(stream.next_back(), Some("👩🏽‍🚒"));
 }
@@ -43,7 +43,6 @@ fn test_utf8_redheart() {
         vec!["r", "e", "d", "❤️", "h", "e", "a", "r", "t"]
     );
 }
-
 
 #[test]
 fn test_utf8_fire_fighter() {

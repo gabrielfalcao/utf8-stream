@@ -22,12 +22,12 @@ doctest = false
 test = true
 
 [[test]]
-name = "test_iterator_as_str"
-path = "./tests/test_iterator_as_str.rs"
-
-[[test]]
 name = "test_contiguous_u8_operations"
 path = "./tests/test_contiguous_u8_operations.rs"
+
+[[test]]
+name = "test_iterator_as_str"
+path = "./tests/test_iterator_as_str.rs"
 
 [[test]]
 name = "test_get_and_index"
